@@ -1,0 +1,11 @@
+# Each stack has its own git repo
+homelab-maestro/
+homelab-n8n-workflows/
+homelab-template/
+infra-stack/
+n8n-gitops/
+network-stack/
+smart-home-stack/
+
+# Local-only Claude settings (permissions, not shareable)
+.claude/settings.local.json
