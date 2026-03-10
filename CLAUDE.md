@@ -18,7 +18,7 @@ zbox (`10.18.19.0/24`). See `INFRASTRUCTURE.md` for topology and DR.
 
 ## Stacks
 
-Each stack has its own CLAUDE.md with services, env vars, and troubleshooting.
+Each stack is a **git submodule** with its own CLAUDE.md (services, env vars, troubleshooting).
 
 | Stack | Summary |
 |-------|---------|
@@ -27,6 +27,8 @@ Each stack has its own CLAUDE.md with services, env vars, and troubleshooting.
 | `smart-home-stack` | Home Assistant, deCONZ, MariaDB, MQTT |
 | `homelab-maestro` | n8n + Moss ops engine (compose is **generated**) |
 | `homelab-n8n-workflows` | Workflow definitions only, no runtime |
+| `homelab-template` | Reusable IaC template for maestro (upstream) |
+| `n8n-gitops` | CLI tool for n8n workflow sync to git |
 
 Env: all stacks use `.env`. Maestro also uses `env/local/common.env`, `env/local/core.env`.
 
@@ -46,6 +48,8 @@ Rules:
 - Prefer scoping `Explore` agents to the relevant stack directory when the question targets one stack.
 - For single-stack questions, delegate rather than reading all stack files in main context.
 - Run independent stack probes in parallel via background `Bash` agents.
+- Agents cannot Edit/Write files in submodules (permission denied). Read submodule files in agents, but apply edits from main context.
+- Agents are denied Edit/Write on submodule files — do submodule edits from main context, use agents only for read/research tasks.
 
 ## Common Commands
 
@@ -53,3 +57,7 @@ Rules:
 |----|---------|
 | Status | `docker compose ps --format table` |
 | Logs | `docker compose logs <svc> --tail 50` |
+
+## Backlog
+
+Improvement backlog lives in `memory/TODO.md` (Claude auto-memory). Review before large changes.
