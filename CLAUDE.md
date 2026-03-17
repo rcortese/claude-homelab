@@ -6,6 +6,8 @@
 - On transient errors (rate limits, timeouts), stop immediately.
 - Tables over prose. No summaries unless asked.
 - For stack-specific details, read the CLAUDE.md inside that stack directory.
+- Git commits: never add `Co-Authored-By` trailers.
+- Stack repos: CLAUDE.md must be in `.gitignore` (AI config, not stack config).
 
 ## Autonomy
 
