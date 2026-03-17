@@ -59,6 +59,7 @@ Rules:
 |----|---------|
 | Status | `docker compose ps --format table` |
 | Logs | `docker compose logs <svc> --tail 50` |
+| Startup order | `network → maestro → infra → smart-home` |
 
 ## Backlog
 
