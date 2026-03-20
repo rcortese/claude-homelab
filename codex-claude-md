@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+workspace="$(pwd)"
+bootstrap=$(cat <<'EOF'
+Use `CLAUDE.md` in the current workspace root as the project's operational contract for this session.
+At session start, read `./CLAUDE.md`. If the task targets a specific stack, read that stack's nearest `CLAUDE.md` before acting.
+Do not treat project documentation as automatic context for delegated agents. When delegating, pass only the instructions relevant to the subtask.
+EOF
+)
+
+codex_args=()
+user_prompt=""
+
+while (($#)); do
+  case "$1" in
+    --)
+      shift
+      if (($#)); then
+        user_prompt="$*"
+      fi
+      break
+      ;;
+    -*)
+      codex_args+=("$1")
+      shift
+      if (($#)) && [[ ! "$1" =~ ^- ]]; then
+        case "${codex_args[-1]}" in
+          -c|--config|-m|--model|-p|--profile|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--remote|--local-provider|--add-dir|-i|--image|--enable|--disable)
+            codex_args+=("$1")
+            shift
+            ;;
+        esac
+      fi
+      ;;
+    *)
+      user_prompt="$*"
+      break
+      ;;
+  esac
+done
+
+if [[ -n "$user_prompt" ]]; then
+  bootstrap+=$'\n\n'"User request: $user_prompt"
+fi
+
+exec codex -C "$workspace" "${codex_args[@]}" "$bootstrap"
