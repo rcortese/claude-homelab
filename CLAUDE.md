@@ -14,6 +14,13 @@
 Freely: health checks, logs/configs, validation, querying state.
 Ask first: start/stop/restart, deploy, config changes, backups, destructive ops.
 
+## Safety Guardrails
+
+- Ask first before `docker compose down`, restarts, deploys, backups, or config changes.
+- Never remove Docker volumes without explicit confirmation and a verified backup.
+- Treat `rm -rf`, `git reset --hard`, `git clean`, and force-push as destructive operations requiring confirmation.
+- After editing `.env` files, recreate the affected services with `docker compose up -d` so new values take effect.
+
 ## Host
 
 zbox (`10.18.19.0/24`). See `INFRASTRUCTURE.md` for topology and DR.
