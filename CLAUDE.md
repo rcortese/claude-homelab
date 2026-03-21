@@ -67,6 +67,7 @@ Rules:
 | Status | `docker compose ps --format table` |
 | Logs | `docker compose logs <svc> --tail 50` |
 | Startup order | `network → maestro → infra → smart-home` |
+| Syslog (host file) | `tail -100 /srv/homelab/infra-stack/syslog/messages` |
 
 ## Backlog
 
