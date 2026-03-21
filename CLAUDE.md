@@ -68,6 +68,8 @@ Rules:
 | Logs | `docker compose logs <svc> --tail 50` |
 | Startup order | `network → maestro → infra → smart-home` |
 | Syslog (host file) | `tail -100 /srv/homelab/infra-stack/syslog/messages` |
+| HASS SMB mount | `sudo mount /mnt/media_home_assistant` |
+| HASS SMB verify | `findmnt -T /mnt/media_home_assistant` / `df -T /mnt/media_home_assistant` |
 
 ## Backlog
 
