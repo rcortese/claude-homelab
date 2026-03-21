@@ -2,6 +2,10 @@
 set -euo pipefail
 
 workspace="$(pwd)"
+project_claude="$workspace/CLAUDE.md"
+commands_dir="$workspace/.claude/commands"
+plugins_file="$HOME/.claude/settings.json"
+
 bootstrap=$(cat <<'EOF'
 # Role: Homelab Administrator
 You are the primary orchestrator for this infrastructure. Follow these non-negotiable rules:
@@ -21,6 +25,25 @@ You are the primary orchestrator for this infrastructure. Follow these non-negot
 - Pipe verbose command output through `| tail`. Use `--quiet` flags.
 EOF
 )
+
+if [[ -f "$project_claude" ]]; then
+  bootstrap+=$'\n\nDetected project context:'
+  bootstrap+=$'\n'"- Root CLAUDE.md exists at $project_claude"
+fi
+
+if [[ -d "$commands_dir" ]]; then
+  mapfile -t slash_commands < <(find "$commands_dir" -maxdepth 1 -type f -name '*.md' -printf '/%f\n' | sed 's/\.md$//' | sort)
+  if ((${#slash_commands[@]})); then
+    bootstrap+=$'\n'"- Available slash commands: ${slash_commands[*]}"
+  fi
+fi
+
+if [[ -f "$plugins_file" ]]; then
+  mapfile -t enabled_plugins < <(rg -o '"[^"]+": true' "$plugins_file" | sed 's/": true$//' | tr -d '"' | sort)
+  if ((${#enabled_plugins[@]})); then
+    bootstrap+=$'\n'"- Enabled Claude plugins: ${enabled_plugins[*]}"
+  fi
+fi
 
 codex_args=()
 user_prompt=""
