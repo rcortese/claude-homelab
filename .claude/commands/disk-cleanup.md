@@ -5,6 +5,16 @@ allowed-tools: Bash, Read
 
 Check disk usage and guide cleanup for zbox. Run all steps in order.
 
+## Step 0: Emergency reserve
+`/DISK_FULL_DELETE_ME_TO_FREE_1G` is a 1 GB pre-allocated file at the root filesystem. If the disk is 100% full and nothing else works, delete it first to get breathing room:
+```
+sudo rm /DISK_FULL_DELETE_ME_TO_FREE_1G
+```
+After cleanup, recreate it:
+```
+sudo dd if=/dev/zero of=/DISK_FULL_DELETE_ME_TO_FREE_1G bs=1M count=1024 status=none
+```
+
 ## Step 1: Assess
 ```
 df -h /
@@ -55,8 +65,7 @@ Flag DBs over 200MB. Run `VACUUM ANALYZE` if bloated.
 - gravity_old: `rm /srv/homelab/network-stack/pihole/etc-pihole/gravity_old.db` (if present)
 - Docker: `docker system prune -f` (safe — skips active containers/images)
 
-## Step 5: Privileged cleanup (provide commands for user to run)
-Claude cannot sudo. Give user these commands:
+## Step 5: Privileged cleanup
 ```
 sudo apt clean
 sudo journalctl --vacuum-time=7d
