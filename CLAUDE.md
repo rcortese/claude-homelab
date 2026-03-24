@@ -71,6 +71,19 @@ Rules:
 | HASS SMB mount | `sudo mount /mnt/media_home_assistant` |
 | HASS SMB verify | `findmnt -T /mnt/media_home_assistant` / `df -T /mnt/media_home_assistant` |
 
+## Learned Behavior
+
+- `smart-home-stack` `file-mover` now expects SMB destination validation by env:
+  `FILEMOVER_DEST`, `FILEMOVER_DEST_REQUIRE_MOUNT`, `FILEMOVER_DEST_EXPECTED_FSTYPE`, `FILEMOVER_DEST_EXPECTED_SOURCE`.
+- Expected production values for Home Assistant export:
+  `FILEMOVER_DEST=/mnt/media_home_assistant`
+  `FILEMOVER_DEST_REQUIRE_MOUNT=true`
+  `FILEMOVER_DEST_EXPECTED_FSTYPE=cifs`
+  `FILEMOVER_DEST_EXPECTED_SOURCE=//media.lan/home-assistant`
+- New `file-mover` image versions expose a Docker healthcheck and log `DEST_VALIDATION_OK` when the mount check passes.
+- Failure markers to grep for: `DEST_MOUNT_INVALID`, `DEST_FSTYPE_MISMATCH`, `DEST_SOURCE_MISMATCH`.
+- If `rcortese/file-mover:latest` was republished, `docker compose up -d` alone may keep the old local image. Pull first, then recreate the service.
+
 ## Backlog
 
 Improvement backlog lives in `memory/TODO.md` (Claude auto-memory). Review before large changes.
