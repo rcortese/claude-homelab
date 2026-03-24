@@ -1,83 +1,244 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-workspace="$(pwd)"
-project_claude="$workspace/CLAUDE.md"
-commands_dir="$workspace/.claude/commands"
-plugins_file="$HOME/.claude/settings.json"
+HOME_CLAUDE="$HOME/.claude/CLAUDE.md"
+GLOBAL_COMMANDS_DIR="$HOME/.claude/commands"
+PLUGINS_ROOT="$HOME/.claude/plugins/marketplaces"
+PLUGINS_FILE="$HOME/.claude/settings.json"
 
-bootstrap=$(cat <<'EOF'
-# Role: Homelab Administrator
-You are the primary orchestrator for this infrastructure. Follow these non-negotiable rules:
+realpath_safe() {
+  local path="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath -m "$path"
+  else
+    readlink -f "$path"
+  fi
+}
 
-## 1. Context Strategy
-- At session start, read `./CLAUDE.md`.
-- HIERARCHICAL LOADING: When entering a stack directory (e.g., network-stack/), find and read its local `CLAUDE.md`. Local rules override root rules.
-- EXTENSIONS: Index `.claude/commands/` for slash commands (e.g., /backup, /stack-status). Use `read_file` on them for precise execution.
+workspace_root() {
+  if [[ -n "${CODEX_CLAUDE_WORKSPACE:-}" ]]; then
+    realpath_safe "$CODEX_CLAUDE_WORKSPACE"
+  else
+    realpath_safe "$PWD"
+  fi
+}
 
-## 2. Safety Guardrails (Immediate Enforcement)
-- ASK BEFORE: `docker compose down`, service restarts, deploys, or destructive git/file ops (rm -rf, git reset).
-- VOLUMES: Never remove Docker volumes without explicit confirmation and a verified backup.
-- ENV: After editing `.env` files, recreate services with `docker compose up -d`.
+SCRIPT_PATH="$(realpath_safe "$0")"
 
-## 3. Communication Style
-- Tables over prose. Minimalist output. No summaries unless asked.
-- Pipe verbose command output through `| tail`. Use `--quiet` flags.
+print_file_block() {
+  local title="$1"
+  local path="$2"
+
+  [[ -f "$path" ]] || return 0
+
+  printf '## %s\n' "$title"
+  printf 'Path: %s\n' "$path"
+  printf '```md\n'
+  cat "$path"
+  printf '\n```\n\n'
+}
+
+append_command_names() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 0
+
+  find "$dir" -maxdepth 1 -type f -name '*.md' -printf '/%f\n' \
+    | sed 's/\.md$//' \
+    | sort
+}
+
+enabled_plugins() {
+  [[ -f "$PLUGINS_FILE" ]] || return 0
+
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '
+      .enabledPlugins // {}
+      | to_entries[]
+      | select(.value == true)
+      | .key
+    ' "$PLUGINS_FILE"
+    return 0
+  fi
+
+  grep -o '"[^"]*": true' "$PLUGINS_FILE" | sed 's/": true$//' | tr -d '"'
+}
+
+append_enabled_plugin_commands() {
+  local plugin
+
+  while IFS= read -r plugin; do
+    [[ -n "$plugin" ]] || continue
+
+    local plugin_name="${plugin%@*}"
+    local plugin_marketplace="${plugin#*@}"
+    local plugin_command_dir
+
+    for plugin_command_dir in \
+      "$PLUGINS_ROOT/$plugin_marketplace/plugins/$plugin_name/commands" \
+      "$PLUGINS_ROOT/$plugin_marketplace/$plugin_name/commands" \
+      "$PLUGINS_ROOT/$plugin_marketplace/.claude/commands"
+    do
+      if [[ -d "$plugin_command_dir" ]]; then
+        append_command_names "$plugin_command_dir"
+      fi
+    done
+  done < <(enabled_plugins)
+}
+
+print_commands_block() {
+  local target_dir="$1"
+  local session_root="$2"
+  local target_commands_dir="$target_dir/.claude/commands"
+  local session_commands_dir="$session_root/.claude/commands"
+  local commands=()
+  local line
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && commands+=("$line")
+  done < <(append_command_names "$GLOBAL_COMMANDS_DIR")
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && commands+=("$line")
+  done < <(append_command_names "$session_commands_dir")
+
+  if [[ "$(realpath_safe "$target_dir")" != "$(realpath_safe "$session_root")" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && commands+=("$line")
+    done < <(append_command_names "$target_commands_dir")
+  fi
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && commands+=("$line")
+  done < <(append_enabled_plugin_commands)
+
+  if ((${#commands[@]})); then
+    printf '## Available Slash Commands\n'
+    printf '%s\n' "${commands[@]}" | sort -u | paste -sd' ' -
+    printf '\n\n'
+  fi
+}
+
+print_context() {
+  local target_input="${1:-.}"
+  local mode="${2:-dynamic}"
+  local target_dir
+  local session_root
+  local local_claude
+  local local_override
+
+  target_dir="$(realpath_safe "$target_input")"
+  session_root="$(workspace_root)"
+  local_claude="$target_dir/CLAUDE.md"
+  local_override="$target_dir/.claude.local.md"
+
+  printf '# Codex Claude Context\n\n'
+  printf 'Mode: %s\n' "$mode"
+  printf 'Session root: %s\n' "$session_root"
+  printf 'Target directory: %s\n\n' "$target_dir"
+
+  print_file_block "Global CLAUDE" "$HOME_CLAUDE"
+  if [[ "$(realpath_safe "$session_root")" != "$(realpath_safe "$target_dir")" ]]; then
+    print_file_block "Session Root CLAUDE" "$session_root/CLAUDE.md"
+    print_file_block "Session Root Local Override" "$session_root/.claude.local.md"
+  fi
+
+  if [[ "$mode" == "initial" ]]; then
+    print_file_block "Initial Directory CLAUDE" "$local_claude"
+    print_file_block "Initial Directory Local Override" "$local_override"
+  else
+    print_file_block "Entered Directory CLAUDE" "$local_claude"
+    print_file_block "Entered Directory Local Override" "$local_override"
+  fi
+
+  print_commands_block "$target_dir" "$session_root"
+}
+
+launch_codex() {
+  local workspace
+  local initial_context
+  local bootstrap
+  local codex_args=()
+  local user_prompt=""
+  local requested_workspace="${PWD}"
+
+  while (($#)); do
+    case "$1" in
+      --)
+        shift
+        if (($#)); then
+          user_prompt="$*"
+        fi
+        break
+        ;;
+      -*)
+        codex_args+=("$1")
+        shift
+        if (($#)) && [[ ! "$1" =~ ^- ]]; then
+          case "${codex_args[-1]}" in
+            -c|--config|-m|--model|-p|--profile|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--remote|--local-provider|--add-dir|-i|--image|--enable|--disable)
+              if [[ "${codex_args[-1]}" == "-C" || "${codex_args[-1]}" == "--cd" ]]; then
+                requested_workspace="$1"
+              fi
+              codex_args+=("$1")
+              shift
+              ;;
+          esac
+        fi
+        ;;
+      *)
+        user_prompt="$*"
+        break
+        ;;
+    esac
+  done
+
+  workspace="$(realpath_safe "$requested_workspace")"
+  export CODEX_CLAUDE_WORKSPACE="$workspace"
+
+  initial_context="$(print_context "$workspace" initial)"
+
+  bootstrap=$(cat <<EOF
+# Role: Claude-Compatible Top-Level Operator
+Your job is to imitate Claude's top-level workspace behavior as closely as possible while running on Codex.
+
+## Context Loading
+- Start with the active context bundle below.
+- During the session, if you start working in another directory, load that directory's context before proceeding by running:
+  \`$SCRIPT_PATH context <dir>\`
+- Treat any returned \`CLAUDE.md\`, \`.claude.local.md\`, and local slash commands as newly active local overrides for that directory.
+- If the entered directory has no local context file, keep the existing context.
+
+## Operating Model
+- Use the real loaded context files as the source of truth.
+- Prefer local directory rules over broader ones when they conflict.
+- Use discovered slash commands by reading their backing markdown file before executing them precisely.
+- Keep output minimalist unless the loaded context says otherwise.
+
+$initial_context
 EOF
 )
 
-if [[ -f "$project_claude" ]]; then
-  bootstrap+=$'\n\nDetected project context:'
-  bootstrap+=$'\n'"- Root CLAUDE.md exists at $project_claude"
-fi
-
-if [[ -d "$commands_dir" ]]; then
-  mapfile -t slash_commands < <(find "$commands_dir" -maxdepth 1 -type f -name '*.md' -printf '/%f\n' | sed 's/\.md$//' | sort)
-  if ((${#slash_commands[@]})); then
-    bootstrap+=$'\n'"- Available slash commands: ${slash_commands[*]}"
+  if [[ -n "$user_prompt" ]]; then
+    bootstrap+=$'\n\n'"User request: $user_prompt"
   fi
-fi
 
-if [[ -f "$plugins_file" ]]; then
-  mapfile -t enabled_plugins < <(rg -o '"[^"]+": true' "$plugins_file" | sed 's/": true$//' | tr -d '"' | sort)
-  if ((${#enabled_plugins[@]})); then
-    bootstrap+=$'\n'"- Enabled Claude plugins: ${enabled_plugins[*]}"
-  fi
-fi
+  exec codex -C "$workspace" "${codex_args[@]}" "$bootstrap"
+}
 
-codex_args=()
-user_prompt=""
-
-while (($#)); do
-  case "$1" in
-    --)
+main() {
+  case "${1:-}" in
+    context)
       shift
-      if (($#)); then
-        user_prompt="$*"
-      fi
-      break
+      print_context "${1:-.}" dynamic
       ;;
-    -*)
-      codex_args+=("$1")
+    context-initial)
       shift
-      if (($#)) && [[ ! "$1" =~ ^- ]]; then
-        case "${codex_args[-1]}" in
-          -c|--config|-m|--model|-p|--profile|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--remote|--local-provider|--add-dir|-i|--image|--enable|--disable)
-            codex_args+=("$1")
-            shift
-            ;;
-        esac
-      fi
+      print_context "${1:-.}" initial
       ;;
     *)
-      user_prompt="$*"
-      break
+      launch_codex "$@"
       ;;
   esac
-done
+}
 
-if [[ -n "$user_prompt" ]]; then
-  bootstrap+=$'\n\n'"User request: $user_prompt"
-fi
-
-exec codex -C "$workspace" "${codex_args[@]}" "$bootstrap"
+main "$@"
