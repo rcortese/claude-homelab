@@ -41,6 +41,27 @@ Each stack is a **git submodule** with its own CLAUDE.md (services, env vars, tr
 
 Env: all stacks use `.env`. Maestro also uses `env/local/common.env`, `env/local/core.env`.
 
+## Stack Integrations
+
+Documented cross-stack links to keep in mind before changes:
+
+| Source | Target | Mechanism | Why it matters |
+|-------|--------|-----------|----------------|
+| `network-stack` | `homelab-maestro` | Pi-hole local DNS/CNAME for `n8n.rodolflix.com`; Caddy reverse proxy `n8n.rodolflix.com` → `zbox.lan:5678` | n8n UI, webhooks, and Diun notifications depend on DNS + proxy path staying intact. |
+| `infra-stack` | `homelab-maestro` | Diun webhook `POST https://n8n.rodolflix.com/webhook/diun-updates` | Image update alerts flow into n8n through the public endpoint exposed by `network-stack`. |
+| `homelab-maestro` | `homelab-n8n-workflows` | Bind mount `/srv/homelab/homelab-n8n-workflows` into `/home/node/.n8n-files/export`; `util.git.backup.workflows` exports runtime workflows there | Workflow backups/export live in git outside the runtime container. |
+| `homelab-maestro` | `n8n-gitops` | Deployed n8n can drift from git; re-sync path uses `n8n-gitops` when workflow JSON and runtime diverge | Git is not automatically the source of truth unless workflows are re-synced. |
+| `smart-home-stack` | `network-stack` | Home Assistant and `file-mover` use LAN names such as `media.lan` and `zbox.lan`; Pi-hole is the managed DNS layer in this homelab | Name resolution issues can look like HA, SSH, or SMB failures when the real fault is DNS/ingress. |
+| `smart-home-stack` | Unraid | Home Assistant uses SSH to `root@media.lan` and remote scripts under `/mnt/user/appdata/unraid-scripts/` | Some HA automations manage VMs and Docker on Unraid, so this stack is not self-contained. |
+| `smart-home-stack` | host SMB mount | `file-mover` writes to `${FILEMOVER_DEST}`; production expects `/mnt/media_home_assistant` mounted from `//media.lan/home-assistant` | Camera/file export can silently fall back to local disk if the host mount is wrong. |
+| `infra-stack` | other stacks | `syslog-ng` classifies remote/manual Docker syslog into `network.log`, `smarthome.log`, `maestro.log` | Central log collection exists, but forwarding is not the default compose logging path for every service. |
+| `homelab-template` | `homelab-maestro` | Maestro compose/env are generated from template scripts and fragments | Structural maestro changes belong in template/fragments, not hand-edited generated compose output. |
+
+| Integration class | Meaning |
+|-------------------|---------|
+| Publication / automation | Breaking DNS, proxy, webhook, SSH, workflow sync, or SMB export paths changes behavior across stacks and can justify startup-order or rollout coordination. |
+| Observability | Syslog and similar collectors help debugging, but losing them should not be treated as the same class of outage as ingress, automation, or storage/export failures. |
+
 Container updates: use `/update-stacks` skill.
 
 ## Agent Delegation
