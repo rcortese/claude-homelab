@@ -130,3 +130,13 @@ Stack-specific variables: see each stack's `CLAUDE.md`.
 ---
 
 Startup order and backup data: use `/update-stacks` and `/backup` skills.
+
+## 2026-04 operational reflection
+
+- `zbox` is now the preferred operational control plane for local observability and lightweight ingress.
+- `Homelab Sentinel` replaced the old n8n-based health backbone in production.
+- `homelab-maestro` is no longer part of the active runtime path.
+- `n8n.rodolflix.com` was intentionally retired and removed from production DNS/public routing.
+- Home Assistant is now published internally at `ha.rodolflix.com` through zbox Caddy.
+- Home Assistant remains intentionally local-only at the ingress layer. Remote access is handled by Nabu Casa.
+- `deconz` is currently intentionally disabled and should not be treated as an outage until the Zigbee end devices are re-enabled.
