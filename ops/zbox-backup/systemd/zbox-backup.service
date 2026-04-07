@@ -1,0 +1,19 @@
+[Unit]
+Description=Centralized zbox backup to Unraid
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+ConditionPathExists=/srv/homelab/ops/zbox-backup/zbox-backup.sh
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/srv/homelab
+ExecStart=/srv/homelab/ops/zbox-backup/zbox-backup.sh
+TimeoutStartSec=2h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target
