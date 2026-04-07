@@ -1,0 +1,6 @@
+# intentionally excluded from the first rollout
+/srv/homelab/infra-stack/syslog/
+/srv/homelab/smart-home-stack/export/
+/srv/homelab/homelab-maestro/
+/home/rcortese/
+/var/lib/docker/

@@ -1,0 +1,17 @@
+[Unit]
+Description=Validate centralized zbox backup freshness and mount health
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/srv/homelab/ops/zbox-backup/zbox-backup-validate.sh
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/srv/homelab
+ExecStart=/srv/homelab/ops/zbox-backup/zbox-backup-validate.sh
+TimeoutStartSec=10m
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
