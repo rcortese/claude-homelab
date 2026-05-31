@@ -11,3 +11,5 @@ the-ai-crowd/
 
 # Local-only Claude settings (permissions, not shareable)
 .claude/settings.local.json
+homelab-sentinel/
+sentinel-stack/
