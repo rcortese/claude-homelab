@@ -34,6 +34,16 @@ remote_run() {
   "${SSH_CMD[@]}" "$REMOTE_TARGET" "$1"
 }
 
+load_exclude_patterns() {
+  EXCLUDE_PATTERNS=()
+  [[ -f "$BACKUP_EXCLUDES_FILE" ]] || return 0
+  while IFS= read -r line; do
+    [[ -n "${line:-}" ]] || continue
+    [[ "$line" == \#* ]] && continue
+    EXCLUDE_PATTERNS+=("$line")
+  done < "$BACKUP_EXCLUDES_FILE"
+}
+
 sync_file() {
   local src="$1"
   local rel="$2"
@@ -51,7 +61,12 @@ sync_dir() {
   [[ -d "$src" ]] || return 0
   mkdir_remote "$REMOTE_SNAPSHOT/$rel"
   log "sync dir: $src -> $REMOTE_SNAPSHOT/$rel/" | tee -a "$REPORT_FILE"
-  "${RSYNC_CMD[@]}" "$src/" "$REMOTE_TARGET:$REMOTE_SNAPSHOT/$rel/"
+  local -a cmd=("${RSYNC_CMD[@]}")
+  local pattern
+  for pattern in "${EXCLUDE_PATTERNS[@]:-}"; do
+    cmd+=(--exclude="$pattern")
+  done
+  "${cmd[@]}" "$src/" "$REMOTE_TARGET:$REMOTE_SNAPSHOT/$rel/"
 }
 
 capture_host_state() {
@@ -123,6 +138,7 @@ require_cmd flock
 : "${SMART_HOME_ENV_FILE:?missing SMART_HOME_ENV_FILE}"
 : "${MARIADB_CONTAINER:?missing MARIADB_CONTAINER}"
 : "${BACKUP_PATHS_FILE:?missing BACKUP_PATHS_FILE}"
+BACKUP_EXCLUDES_FILE="${BACKUP_EXCLUDES_FILE:-/srv/homelab/ops/zbox-backup/backup-excludes.txt}"
 
 REMOTE_TARGET="${REMOTE_USER}@${REMOTE_HOST}"
 REMOTE_ROOT="${REMOTE_BASE%/}"
@@ -173,6 +189,10 @@ log "starting zbox backup run $RUN_TS" | tee "$REPORT_FILE"
 
 echo >> "$REPORT_FILE"
 echo "[stateful paths]" | tee -a "$REPORT_FILE"
+load_exclude_patterns
+if [[ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]]; then
+  printf "exclude_patterns=%s\n" "$(IFS=,; echo "${EXCLUDE_PATTERNS[*]}")" | tee -a "$REPORT_FILE"
+fi
 load_backup_paths
 
 capture_host_state

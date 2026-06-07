@@ -4,3 +4,7 @@
 /srv/homelab/homelab-maestro/
 /home/rcortese/
 /var/lib/docker/
+backup/
+backups/
+*.bak
+*.bak.*
