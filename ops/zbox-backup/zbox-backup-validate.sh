@@ -66,6 +66,14 @@ if [[ "$report_exists" != "yes" ]]; then
   exit 1
 fi
 
+run_ts="${latest_target##*/}"
+[[ "$run_ts" =~ ^[0-9]{8}T[0-9]{6}Z$ && "$latest_target" == "$REMOTE_SNAPSHOT_ROOT/$run_ts" ]] || {
+  echo "validation failed: unexpected latest target" >&2; exit 1;
+}
+remote_eval "grep -Fx 'status=success' '$REMOTE_REPORTS/zbox-backup-latest.txt' >/dev/null && grep -Fx 'run_ts=$run_ts' '$REMOTE_REPORTS/zbox-backup-latest.txt' >/dev/null && grep -Fx 'snapshot=$latest_target' '$REMOTE_REPORTS/zbox-backup-latest.txt' >/dev/null && cmp '$REMOTE_REPORTS/zbox-backup-latest.txt' '$REMOTE_REPORTS/zbox-backup-$run_ts.txt' && test -s '$REMOTE_ROOT/dumps/smart-home-mariadb/homeassistant-$run_ts.sql.gz' && gzip -t '$REMOTE_ROOT/dumps/smart-home-mariadb/homeassistant-$run_ts.sql.gz'" || {
+  echo "validation failed: report/snapshot/dump mismatch or invalid dump" >&2; exit 1;
+}
+
 snapshot_count="$(remote_eval "find '$REMOTE_SNAPSHOT_ROOT' -mindepth 1 -maxdepth 1 -type d | wc -l")"
 if [[ "${snapshot_count:-0}" -lt 1 ]]; then
   echo "validation failed: no snapshots found" >&2

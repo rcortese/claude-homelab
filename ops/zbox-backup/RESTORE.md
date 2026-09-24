@@ -61,12 +61,22 @@ gzip -dc /mnt/user/backups/zbox/dumps/smart-home-mariadb/<dump>.sql.gz \
 4. Restart dependent services.
 5. Validate Home Assistant history and recorder-backed views.
 
-## homelab-sentinel
+## sentinel-stack
 
 1. Stop sentinel services.
-2. Restore from `$LATEST/sentinel/config/`, `$LATEST/sentinel/state/`, `$LATEST/sentinel/runtime/`, and `$LATEST/sentinel/metrics/`.
-3. Start the stack again.
-4. Validate Grafana, Gatus, Prometheus, and Alertmanager.
+2. Restore `$LATEST/sentinel/config/` into `/srv/homelab/sentinel-stack/`, `sentinel/state/` into its `state/`, `sentinel/runtime/{alertmanager,gatus,grafana}/` into its corresponding `data/` directories, and `sentinel/metrics/prometheus/` into `data/prometheus/`.
+3. Restore `$LATEST/sentinel/promotions/roy-published-20260719t032340Z/` to `/srv/homelab/sentinel-promotions/roy-published-20260719t032340Z/`: the active Gatus and Prometheus mounts use this promotion, not the base config. Preserve its Compose override and original path identities.
+4. Start the stack again using the base Compose and the restored promotion override.
+5. Validate Grafana, Gatus, Prometheus, and Alertmanager.
+
+## Backup guarantees and limits
+
+- Every manifest source is mandatory; missing files/directories fail before remote writes. Retired Diun and the nonexistent smart-home `.ssh` source are no longer claimed as covered. Smart-home Compose is `docker-compose.yml`.
+- SQLite files identified by their header are copied using Python's SQLite online backup API, validated with `PRAGMA integrity_check`, and published without live WAL/SHM/journal sidecars. This is per-database consistency, not a coordinated cross-service snapshot. Databases created during discovery/rsync and symlinked databases are not covered by this guarantee.
+- Non-SQLite mutable data (Prometheus TSDB, Portainer BoltDB, MQTT persistence, etc.) remains a live rsync copy, not application-consistent recovery proof.
+- The validator binds the latest report, timestamped report, snapshot generation and gzip-tested MariaDB dump. Gzip integrity and SQLite integrity are not a full MariaDB import or application restore drill.
+- The existing destination/transport and retention policy remain unchanged. Backups contain credentials in plaintext at rest; no encryption, immutability, OS rebuild, Docker image archive, or disaster-recovery completeness is implied.
+- Source self-tests: `sudo python3 ops/zbox-backup/test-backup.py`; preflight: `sudo ops/zbox-backup/zbox-backup.sh --check-sources`. No service lifecycle is required for either test.
 
 ## Post-restore validation
 

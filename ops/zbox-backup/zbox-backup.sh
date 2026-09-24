@@ -47,18 +47,18 @@ load_exclude_patterns() {
 sync_file() {
   local src="$1"
   local rel="$2"
-  [[ -f "$src" ]] || return 0
+  [[ -f "$src" ]] || { echo "missing required file: $src" >&2; return 1; }
   local parent
   parent="$(dirname "$rel")"
   mkdir_remote "$REMOTE_SNAPSHOT/$parent"
   log "sync file: $src -> $REMOTE_SNAPSHOT/$parent/" | tee -a "$REPORT_FILE"
-  "${RSYNC_CMD[@]}" "$src" "$REMOTE_TARGET:$REMOTE_SNAPSHOT/$parent/"
+  "${RSYNC_CMD[@]}" "$src" "$REMOTE_TARGET:$REMOTE_SNAPSHOT/$rel"
 }
 
 sync_dir() {
   local src="$1"
   local rel="$2"
-  [[ -d "$src" ]] || return 0
+  [[ -d "$src" ]] || { echo "missing required directory: $src" >&2; return 1; }
   mkdir_remote "$REMOTE_SNAPSHOT/$rel"
   log "sync dir: $src -> $REMOTE_SNAPSHOT/$rel/" | tee -a "$REPORT_FILE"
   local -a cmd=("${RSYNC_CMD[@]}")
@@ -66,7 +66,28 @@ sync_dir() {
   for pattern in "${EXCLUDE_PATTERNS[@]:-}"; do
     cmd+=(--exclude="$pattern")
   done
-  "${cmd[@]}" "$src/" "$REMOTE_TARGET:$REMOTE_SNAPSHOT/$rel/"
+  local sqlite_stage="$LOCAL_STAGING/sqlite/$rel"
+  local sqlite_excludes="$LOCAL_STAGING/sqlite-excludes.txt"
+  python3 "$(dirname "${BASH_SOURCE[0]}")/sqlite-backup.py" \
+    "$src" "$sqlite_stage" "$sqlite_excludes" | tee -a "$REPORT_FILE"
+  "${cmd[@]}" --exclude-from="$sqlite_excludes" "$src/" "$REMOTE_TARGET:$REMOTE_SNAPSHOT/$rel/"
+  # No --delete here: this overlay contains databases only.
+  rsync -aHAX --numeric-ids -e "$SSH_CMD_STR" \
+    "$sqlite_stage/" "$REMOTE_TARGET:$REMOTE_SNAPSHOT/$rel/"
+}
+
+check_sources() {
+  local kind src rel
+  [[ -s "$BACKUP_PATHS_FILE" ]] || { echo "missing backup manifest" >&2; return 1; }
+  while IFS='|' read -r kind src rel; do
+    [[ -n "$kind" && "$kind" != \#* ]] || continue
+    case "$kind" in
+      file) [[ -f "$src" ]] ;;
+      dir) [[ -d "$src" ]] ;;
+      *) echo "invalid manifest kind: $kind" >&2; return 1 ;;
+    esac || { echo "missing required $kind: $src" >&2; return 1; }
+  done < "$BACKUP_PATHS_FILE"
+  [[ -s "$SMART_HOME_ENV_FILE" ]] || { echo "missing database environment" >&2; return 1; }
 }
 
 capture_host_state() {
@@ -130,6 +151,7 @@ require_cmd find
 require_cmd awk
 require_cmd du
 require_cmd flock
+require_cmd python3
 
 : "${REMOTE_HOST:?missing REMOTE_HOST}"
 : "${REMOTE_USER:?missing REMOTE_USER}"
@@ -139,6 +161,12 @@ require_cmd flock
 : "${MARIADB_CONTAINER:?missing MARIADB_CONTAINER}"
 : "${BACKUP_PATHS_FILE:?missing BACKUP_PATHS_FILE}"
 BACKUP_EXCLUDES_FILE="${BACKUP_EXCLUDES_FILE:-/srv/homelab/ops/zbox-backup/backup-excludes.txt}"
+check_sources
+if [[ "${1:-}" == --check-sources ]]; then
+  echo "required sources ok"
+  exit 0
+fi
+umask 077
 
 REMOTE_TARGET="${REMOTE_USER}@${REMOTE_HOST}"
 REMOTE_ROOT="${REMOTE_BASE%/}"
@@ -219,6 +247,8 @@ DUMP_FILE="${DUMP_FILE}.gz"
 "${RSYNC_CMD[@]}" "$DUMP_FILE" "$REMOTE_TARGET:$REMOTE_DUMPS/"
 remote_run "find '$REMOTE_DUMPS' -type f -name '*.sql.gz' -mtime +${DUMP_RETENTION_DAYS:-14} -delete"
 
+# Verify required critical artifacts before publishing a successful generation.
+remote_run "test -s '$REMOTE_SNAPSHOT/sentinel/state/sentinel.db' && test -s '$REMOTE_SNAPSHOT/sentinel/runtime/gatus/gatus.db' && test -s '$REMOTE_SNAPSHOT/sentinel/runtime/grafana/grafana.db' && test -s '$REMOTE_SNAPSHOT/smart-home/config/docker-compose.yml' && test -s '$REMOTE_SNAPSHOT/sentinel/promotions/roy-published-20260719t032340Z/compose.override.yaml' && gzip -t '$REMOTE_DUMPS/$(basename "$DUMP_FILE")'"
 write_status
 cp "$REPORT_FILE" "$LOCAL_STAGING/zbox-backup-latest.txt"
 "${RSYNC_CMD[@]}" "$REPORT_FILE" "$REMOTE_TARGET:$REMOTE_REPORTS/"
@@ -226,5 +256,7 @@ cp "$REPORT_FILE" "$LOCAL_STAGING/zbox-backup-latest.txt"
 "${RSYNC_CMD[@]}" "$REPORT_FILE" "$REMOTE_TARGET:$REMOTE_LOGS/"
 "${RSYNC_CMD[@]}" "$STATUS_FILE" "$REMOTE_TARGET:$REMOTE_LOGS/"
 remote_run "mkdir -p '$REMOTE_SNAPSHOT_ROOT' && ln -sfn 'snapshots/$RUN_TS' '$REMOTE_LATEST' && ln -sfn 'snapshots/$RUN_TS' '$REMOTE_CURRENT'"
+"${RSYNC_CMD[@]}" "$LOCAL_STAGING/zbox-backup-latest.txt" "$REMOTE_TARGET:$REMOTE_REPORTS/.zbox-backup-latest.txt.partial"
+remote_run "mv -f '$REMOTE_REPORTS/.zbox-backup-latest.txt.partial' '$REMOTE_REPORTS/zbox-backup-latest.txt'"
 prune_snapshots
 log "zbox backup run finished successfully" | tee -a "$REPORT_FILE"
