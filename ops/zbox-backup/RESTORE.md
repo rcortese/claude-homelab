@@ -65,8 +65,8 @@ gzip -dc /mnt/user/backups/zbox/dumps/smart-home-mariadb/<dump>.sql.gz \
 
 1. Stop sentinel services.
 2. Restore `$LATEST/sentinel/config/` into `/srv/homelab/sentinel-stack/`, `sentinel/state/` into its `state/`, `sentinel/runtime/{alertmanager,gatus,grafana}/` into its corresponding `data/` directories, and `sentinel/metrics/prometheus/` into `data/prometheus/`.
-3. Restore `$LATEST/sentinel/promotions/roy-published-20260719t032340Z/` to `/srv/homelab/sentinel-promotions/roy-published-20260719t032340Z/`: the active Gatus and Prometheus mounts use this promotion, not the base config. Preserve its Compose override and original path identities.
-4. Start the stack again using the base Compose and the restored promotion override.
+3. Restore `$LATEST/sentinel/shield-v2/operational/` to `/srv/homelab/sentinel-runtime/shield-v2/` plus manifest private/state/units. Retain root-only custody; verify full-model digest. Old generations require their original complete vector, never mixed inputs.
+4. Use frozen operational Compose and reconciler drop-in after checking Shield guard. Gatus/Prometheus use canonical config.
 5. Validate Grafana, Gatus, Prometheus, and Alertmanager.
 
 ## Backup guarantees and limits
@@ -91,3 +91,5 @@ After any restore, check:
 
 - If the restore is emergency-only and the repo is unavailable, use the destination-side `RESTORE-QUICKSTART.md`
 - If a restore drill is performed, record it in the workspace backup project docs
+
+Shield operational source: two Compose files only; restore guard, egress and deployment.env alongside source/. Retain private/state/unit selections. No SQLite restore for config rollback. Existing backup semantics unchanged.

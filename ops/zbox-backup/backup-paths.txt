@@ -31,4 +31,12 @@ dir|/srv/homelab/sentinel-stack/data/grafana|sentinel/runtime/grafana
 dir|/srv/homelab/sentinel-stack/data/prometheus|sentinel/metrics/prometheus
 dir|/srv/homelab/sentinel-stack/secrets|sentinel/config/secrets
 dir|/srv/homelab/sentinel-stack/streaming-qos|sentinel/config/streaming-qos
-dir|/srv/homelab/sentinel-promotions/roy-published-20260719t032340Z|sentinel/promotions/roy-published-20260719t032340Z
+dir|/srv/homelab/sentinel-shield-v2-private/f4eed6743df7|sentinel/shield-v2/private
+dir|/srv/homelab/sentinel-shield-v2-state/shield-playback-active|sentinel/shield-v2/state
+dir|/srv/homelab/sentinel-runtime/shield-v2/source|sentinel/shield-v2/operational/source
+file|/srv/homelab/sentinel-runtime/shield-v2/deployment.env|sentinel/shield-v2/operational/deployment.env
+file|/srv/homelab/sentinel-runtime/shield-v2/egress.compose.yaml|sentinel/shield-v2/operational/egress.compose.yaml
+file|/srv/homelab/sentinel-runtime/shield-v2/shield_v2_egress.py|sentinel/shield-v2/operational/shield_v2_egress.py
+file|/etc/systemd/system/shield-v2-egress.service|sentinel/shield-v2/units/shield-v2-egress.service
+file|/etc/systemd/system/shield-v2-start.service|sentinel/shield-v2/units/shield-v2-start.service
+file|/etc/systemd/system/homelab-sentinel-reconcile-incidents.service.d/shield-v2.conf|sentinel/shield-v2/units/shield-v2-reconciler.conf

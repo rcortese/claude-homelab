@@ -102,3 +102,7 @@ The exact runtime contract is defined by:
 - `zbox-backup.conf`
 
 When documentation and config disagree, update the docs immediately after correcting the config.
+
+Gatus/Prometheus use canonical stack config. Shield operational inputs live in sentinel-runtime/shield-v2; private/state/unit manifest entries remain required. Do not put secret values from the selected `.env` or secrets files into documentation or Git.
+
+Shield operational source: two Compose files only; restore guard, egress and deployment.env alongside source/. Retain private/state/unit selections. No SQLite restore for config rollback. Existing backup semantics unchanged.
