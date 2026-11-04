@@ -34,6 +34,11 @@ remote_run() {
   "${SSH_CMD[@]}" "$REMOTE_TARGET" "$1"
 }
 
+generation() {
+  "${SSH_CMD[@]}" "$REMOTE_TARGET" "python3 - '$1' '$REMOTE_ROOT' '$RUN_TS'" \
+    < "$(dirname "${BASH_SOURCE[0]}")/generation.py"
+}
+
 load_exclude_patterns() {
   EXCLUDE_PATTERNS=()
   [[ -f "$BACKUP_EXCLUDES_FILE" ]] || return 0
@@ -79,6 +84,21 @@ sync_dir() {
 check_sources() {
   local kind src rel
   [[ -s "$BACKUP_PATHS_FILE" ]] || { echo "missing backup manifest" >&2; return 1; }
+  python3 - "$BACKUP_PATHS_FILE" <<'PY'
+import pathlib, sys
+seen = set()
+for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+    if not line or line.startswith('#'):
+        continue
+    kind, source, dest = line.split('|')
+    p = pathlib.PurePosixPath(dest)
+    if (kind not in ('file', 'dir') or not dest or p.is_absolute()
+            or '..' in p.parts or dest == '.' or p.parts[0] == '.generation'
+            or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./-' for c in dest)
+            or dest in seen):
+        raise ValueError('unsafe or duplicate manifest destination')
+    seen.add(dest)
+PY
   while IFS='|' read -r kind src rel; do
     [[ -n "$kind" && "$kind" != \#* ]] || continue
     case "$kind" in
@@ -124,20 +144,17 @@ load_backup_paths() {
   done
 }
 
-prune_snapshots() {
-  local keep="${SNAPSHOT_KEEP:-14}"
-  remote_run "cd '$REMOTE_SNAPSHOT_ROOT' && ls -1dt [0-9]* 2>/dev/null | tail -n +$((keep + 1)) | xargs -r -I{} rm -rf -- '$REMOTE_SNAPSHOT_ROOT/{}'"
-}
-
 write_status() {
   local dump_size
   dump_size="$(du -h "$DUMP_FILE" | awk '{print $1}')"
   {
     echo "run_ts=$RUN_TS"
-    echo "status=success"
-    echo "snapshot=$REMOTE_SNAPSHOT"
+    echo "status=captured-pending-validation"
+    echo "snapshot=$REMOTE_SNAPSHOT_ROOT/$RUN_TS"
+    echo "validation=gzip-sql-structure-sqlite-integrity-and-file-hashes"
+    echo "restore_tested=false"
     echo "latest=$REMOTE_LATEST"
-    echo "dump_file=$(basename "$DUMP_FILE")"
+    echo "dump_file=.generation/homeassistant.sql.gz"
     echo "dump_size=$dump_size"
   } | tee -a "$REPORT_FILE" > "$STATUS_FILE"
 }
@@ -171,11 +188,11 @@ umask 077
 REMOTE_TARGET="${REMOTE_USER}@${REMOTE_HOST}"
 REMOTE_ROOT="${REMOTE_BASE%/}"
 REMOTE_SNAPSHOT_ROOT="${REMOTE_ROOT}/snapshots"
-REMOTE_DUMPS="${REMOTE_ROOT}/dumps/smart-home-mariadb"
-REMOTE_REPORTS="${REMOTE_ROOT}/reports"
-REMOTE_LOGS="${REMOTE_ROOT}/logs"
+[[ "$REMOTE_ROOT" =~ ^/[a-zA-Z0-9_./-]+$ && "$REMOTE_ROOT" != / && "$REMOTE_ROOT" != *'/../'* ]] || {
+  echo 'unsafe remote base' >&2; exit 1;
+}
 RUN_TS="$(date -u +%Y%m%dT%H%M%SZ)"
-REMOTE_SNAPSHOT="${REMOTE_SNAPSHOT_ROOT}/${RUN_TS}"
+REMOTE_SNAPSHOT="${REMOTE_ROOT}/attempts/${RUN_TS}"
 REMOTE_LATEST="${REMOTE_ROOT}/latest"
 REMOTE_CURRENT="${REMOTE_ROOT}/current"
 LOCAL_STAGING="${LOCAL_STAGING_ROOT%/}/${RUN_TS}"
@@ -183,27 +200,35 @@ REPORT_FILE="${LOCAL_STAGING}/zbox-backup-${RUN_TS}.txt"
 STATUS_FILE="${LOCAL_STAGING}/zbox-backup-${RUN_TS}.json"
 HOST_STATE_DIR="${LOCAL_STAGING}/host-state"
 
-mkdir -p "$LOCAL_STAGING"
-trap 'rm -rf "$LOCAL_STAGING"' EXIT
-
 exec 9>"$LOCK_FILE"
 flock -n 9 || { echo "backup already running" >&2; exit 1; }
+mkdir -p "${LOCAL_STAGING_ROOT%/}"
+mkdir "$LOCAL_STAGING"
+trap 'rm -rf -- "$LOCAL_STAGING"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 SSH_CMD=(ssh -i "$SSH_KEY_FILE" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
 if [[ -n "${SSH_KNOWN_HOSTS:-}" ]]; then
   SSH_CMD+=( -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" )
 fi
 SSH_CMD_STR="$(printf '%q ' "${SSH_CMD[@]}")"
-RSYNC_CMD=(rsync -aHAX --numeric-ids --delete --info=stats2 -e "$SSH_CMD_STR")
+RSYNC_CMD=(rsync -aHAX --numeric-ids --info=stats2 -e "$SSH_CMD_STR")
 
-mkdir_remote "$REMOTE_SNAPSHOT_ROOT"
-mkdir_remote "$REMOTE_DUMPS"
-mkdir_remote "$REMOTE_REPORTS"
-mkdir_remote "$REMOTE_LOGS"
 remote_run "findmnt /mnt/user -n -o TARGET,FSTYPE | grep -q '^/mnt/user[[:space:]]\\+fuse\.shfs'" || {
   echo "remote backup target is not the expected Unraid shfs mount" >&2
   exit 1
 }
+remote_run "umask 077; mkdir -p '$REMOTE_ROOT/attempts' '$REMOTE_SNAPSHOT_ROOT'; test ! -e '$REMOTE_SNAPSHOT_ROOT/$RUN_TS' && mkdir '$REMOTE_SNAPSHOT' && mkdir '$REMOTE_SNAPSHOT/.generation'"
+# Freeze the selection and exclusions used for this attempt.
+cp "$BACKUP_PATHS_FILE" "$LOCAL_STAGING/backup-paths.txt"
+if [[ -f "$BACKUP_EXCLUDES_FILE" ]]; then
+  cp "$BACKUP_EXCLUDES_FILE" "$LOCAL_STAGING/backup-excludes.txt"
+else
+  : > "$LOCAL_STAGING/backup-excludes.txt"
+fi
+BACKUP_PATHS_FILE="$LOCAL_STAGING/backup-paths.txt"
+BACKUP_EXCLUDES_FILE="$LOCAL_STAGING/backup-excludes.txt"
 
 log "starting zbox backup run $RUN_TS" | tee "$REPORT_FILE"
 {
@@ -244,19 +269,23 @@ docker exec "$MARIADB_CONTAINER" mariadb-dump \
   "$MARIADB_DATABASE" > "$DUMP_FILE"
 gzip -f "$DUMP_FILE"
 DUMP_FILE="${DUMP_FILE}.gz"
-"${RSYNC_CMD[@]}" "$DUMP_FILE" "$REMOTE_TARGET:$REMOTE_DUMPS/"
-remote_run "find '$REMOTE_DUMPS' -type f -name '*.sql.gz' -mtime +${DUMP_RETENTION_DAYS:-14} -delete"
-
-# Verify required critical artifacts before publishing a successful generation.
-remote_run "test -s '$REMOTE_SNAPSHOT/sentinel/state/sentinel.db' && test -s '$REMOTE_SNAPSHOT/sentinel/runtime/gatus/gatus.db' && test -s '$REMOTE_SNAPSHOT/sentinel/runtime/grafana/grafana.db' && test -s '$REMOTE_SNAPSHOT/smart-home/config/docker-compose.yml' && test -s '$REMOTE_SNAPSHOT/sentinel/promotions/roy-published-20260719t032340Z/compose.override.yaml' && gzip -t '$REMOTE_DUMPS/$(basename "$DUMP_FILE")'"
+"${RSYNC_CMD[@]}" "$DUMP_FILE" "$REMOTE_TARGET:$REMOTE_SNAPSHOT/.generation/homeassistant.sql.gz"
+# Every generation carries the exact policy inputs and producer provenance.
+python3 - "$LOCAL_STAGING/capture.json" "$RUN_TS" "${BASH_SOURCE[0]}" <<'PY'
+import hashlib, json, pathlib, subprocess, sys
+out, run, script = sys.argv[1:]
+script = pathlib.Path(script).resolve()
+version = subprocess.run(['git', '-C', str(script.parent), 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
+hashes = {name: hashlib.sha256((script.parent / name).read_bytes()).hexdigest()
+          for name in ('zbox-backup.sh', 'sqlite-backup.py', 'generation.py')}
+pathlib.Path(out).write_text(json.dumps({'run_ts': run, 'producer_commit': version, 'producer_sha256': hashes}))
+PY
 write_status
-cp "$REPORT_FILE" "$LOCAL_STAGING/zbox-backup-latest.txt"
-"${RSYNC_CMD[@]}" "$REPORT_FILE" "$REMOTE_TARGET:$REMOTE_REPORTS/"
-"${RSYNC_CMD[@]}" "$STATUS_FILE" "$REMOTE_TARGET:$REMOTE_REPORTS/"
-"${RSYNC_CMD[@]}" "$REPORT_FILE" "$REMOTE_TARGET:$REMOTE_LOGS/"
-"${RSYNC_CMD[@]}" "$STATUS_FILE" "$REMOTE_TARGET:$REMOTE_LOGS/"
-remote_run "mkdir -p '$REMOTE_SNAPSHOT_ROOT' && ln -sfn 'snapshots/$RUN_TS' '$REMOTE_LATEST' && ln -sfn 'snapshots/$RUN_TS' '$REMOTE_CURRENT'"
-"${RSYNC_CMD[@]}" "$LOCAL_STAGING/zbox-backup-latest.txt" "$REMOTE_TARGET:$REMOTE_REPORTS/.zbox-backup-latest.txt.partial"
-remote_run "mv -f '$REMOTE_REPORTS/.zbox-backup-latest.txt.partial' '$REMOTE_REPORTS/zbox-backup-latest.txt'"
-prune_snapshots
-log "zbox backup run finished successfully" | tee -a "$REPORT_FILE"
+for name in backup-paths.txt backup-excludes.txt capture.json; do
+  "${RSYNC_CMD[@]}" "$LOCAL_STAGING/$name" "$REMOTE_TARGET:$REMOTE_SNAPSHOT/.generation/$name"
+done
+"${RSYNC_CMD[@]}" "$REPORT_FILE" "$REMOTE_TARGET:$REMOTE_SNAPSHOT/.generation/report.txt"
+"${RSYNC_CMD[@]}" "$STATUS_FILE" "$REMOTE_TARGET:$REMOTE_SNAPSHOT/.generation/status.txt"
+generation seal
+generation publish
+log "zbox backup publication acknowledged; run=$RUN_TS restore_tested=false"
