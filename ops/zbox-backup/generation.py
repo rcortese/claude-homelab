@@ -74,6 +74,10 @@ def inventory(root):
                 item.update(type='file', size=s.st_size, sha256=digest(path))
             elif stat.S_ISDIR(s.st_mode):
                 item.update(type='dir')
+            elif stat.S_ISSOCK(s.st_mode):
+                # rsync -a preserves the socket node, not its live process.
+                # Bind its metadata/type without reading or connecting to it.
+                item.update(type='socket')
             else:
                 raise ValueError('unsupported special file in generation')
             result[rel] = item

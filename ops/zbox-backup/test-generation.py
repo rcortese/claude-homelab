@@ -187,6 +187,25 @@ class Generation(unittest.TestCase):
         self.assertFalse((self.base / 'attempts/20010103T000000Z').exists())
         self.old_good()
 
+    def test_socket_metadata_preserved_without_live_endpoint_claim(self):
+        import socket
+        endpoint = self.root / 'syslog.ctl'
+        sock = socket.socket(socket.AF_UNIX)
+        try:
+            sock.bind(str(endpoint))
+        finally:
+            sock.close()
+        self.cli('seal')
+        self.cli('publish')
+        self.cli('latest')
+        receipt = json.loads((self.base / 'latest/.generation/manifest.json').read_text())
+        self.assertEqual(receipt['files']['syslog.ctl']['type'], 'socket')
+        self.assertFalse(receipt['restore_tested'])
+        endpoint = self.base / 'latest/syslog.ctl'
+        endpoint.unlink()
+        endpoint.write_text('replacement is not the captured socket')
+        self.cli('latest', False)
+
     def test_capture_interrupted_no_seal(self):
         self.cli('publish', False)
         self.old_good()

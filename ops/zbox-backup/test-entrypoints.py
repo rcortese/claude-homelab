@@ -135,6 +135,20 @@ LOCK_FILE={self.base}/lock
         result = subprocess.run(['bash', str(ROOT / 'zbox-backup-validate.sh')], env=self.env, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
 
+    def test_real_rsync_socket_and_consumer(self):
+        import socket
+        sock = socket.socket(socket.AF_UNIX)
+        try:
+            sock.bind(str(self.source / 'directory/syslog.ctl'))
+        finally:
+            sock.close()
+        self.run_backup(ok=True)
+        result = subprocess.run(['bash', str(ROOT / 'zbox-backup-validate.sh')], env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        receipt = json.loads((self.remote / 'latest/.generation/manifest.json').read_text())
+        self.assertEqual(receipt['files']['directory/syslog.ctl']['type'], 'socket')
+        self.assertFalse(receipt['restore_tested'])
+
     def test_missing_source(self):
         (self.source / '0').unlink()
         self.run_backup()
