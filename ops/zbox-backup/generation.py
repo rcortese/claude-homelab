@@ -16,12 +16,15 @@ import stat
 import sys
 
 SCHEMA = 1
-CRITICAL = (
-    'network-stack/.env',
-    'smart-home/config/.env',
+CRITICAL_SQLITE = (
     'sentinel/state/sentinel.db',
     'sentinel/runtime/gatus/gatus.db',
     'sentinel/runtime/grafana/grafana.db',
+)
+CRITICAL = (
+    'network-stack/.env',
+    'smart-home/config/.env',
+    *CRITICAL_SQLITE,
     'smart-home/config/docker-compose.yml',
     'sentinel/shield-v2/operational/source/compose.yaml',
     'sentinel/shield-v2/operational/source/compose.shield-v2.yaml',
@@ -95,6 +98,18 @@ def validate_dump(path):
     return {'compressed_sha256': digest(path), 'sql_bytes': size, 'validation': 'gzip-and-sql-structure', 'restore_tested': False}
 
 
+def validate_sqlite(path):
+    require(path.is_file() and not path.is_symlink(), 'missing regular SQLite database')
+    # Expected databases must never become generic files by losing their magic.
+    with path.open('rb') as stream:
+        require(stream.read(16) == b'SQLite format 3\x00', 'invalid SQLite database header')
+    db = sqlite3.connect(path.resolve().as_uri() + '?mode=ro&immutable=1', uri=True)
+    try:
+        require(db.execute('PRAGMA integrity_check').fetchall() == [('ok',)], 'SQLite integrity failure')
+    finally:
+        db.close()
+
+
 def checks(root):
     metadata = root / '.generation'
     for line in (metadata / 'backup-paths.txt').read_text().splitlines():
@@ -108,20 +123,20 @@ def checks(root):
         p = root / rel
         require(p.is_file() and p.stat().st_size > 0, 'missing critical artifact')
     # Validate the copied standalone DBs, not live sources or user rows.
-    db_count = 0
+    for rel in CRITICAL_SQLITE:
+        validate_sqlite(root / rel)
+    db_count = len(CRITICAL_SQLITE)
     for directory, _, files in os.walk(root, followlinks=False):
         for name in files:
             p = Path(directory) / name
             if p.is_symlink() or not p.is_file():
                 continue
+            if p.relative_to(root).as_posix() in CRITICAL_SQLITE:
+                continue
             with p.open('rb') as stream:
                 header = stream.read(16)
             if header == b'SQLite format 3\x00':
-                db = sqlite3.connect(p.resolve().as_uri() + '?mode=ro&immutable=1', uri=True)
-                try:
-                    require(db.execute('PRAGMA integrity_check').fetchall() == [('ok',)], 'SQLite integrity failure')
-                finally:
-                    db.close()
+                validate_sqlite(p)
                 db_count += 1
     return {'sqlite_databases': db_count, 'dump': validate_dump(metadata / 'homeassistant.sql.gz')}
 

@@ -117,6 +117,51 @@ class Generation(unittest.TestCase):
         self.cli('seal', False)
         self.old_good()
 
+    def reject_invalid_required_sqlite(self, payload):
+        # Literal expected paths form an oracle independent of magic discovery.
+        for rel in ('sentinel/state/sentinel.db',
+                    'sentinel/runtime/gatus/gatus.db',
+                    'sentinel/runtime/grafana/grafana.db'):
+            with self.subTest(database=rel):
+                case = Generation(methodName='runTest')
+                case.setUp()
+                try:
+                    (case.root / rel).write_bytes(payload)
+                    case.cli('seal', False)
+                    case.cli('publish', False)
+                    case.old_good()
+                    self.assertFalse((case.meta / 'manifest.json').exists())
+                finally:
+                    case.doCleanups()
+
+    def test_required_sqlite_invalid_header(self):
+        self.reject_invalid_required_sqlite(b'not a SQLite database; corrupted header\n')
+
+    def test_required_sqlite_truncated_header(self):
+        self.reject_invalid_required_sqlite(b'SQLite')
+
+    def corrupt_sealed_required_sqlite(self, root):
+        # Model a structurally hash-consistent receipt from the old faulty
+        # producer. The semantic oracle must reject the expected DB type too.
+        (root / 'sentinel/state/sentinel.db').write_bytes(b'corrupted header\n')
+        manifest = root / '.generation/manifest.json'
+        receipt = json.loads(manifest.read_text())
+        receipt['files'] = g.inventory(root)
+        receipt['checks']['sqlite_databases'] = 2
+        manifest.write_text(json.dumps(receipt))
+
+    def test_publish_rechecks_required_sqlite_type(self):
+        self.cli('seal')
+        self.corrupt_sealed_required_sqlite(self.root)
+        self.cli('publish', False)
+        self.old_good()
+
+    def test_consumer_rechecks_required_sqlite_type(self):
+        self.cli('seal')
+        self.cli('publish')
+        self.corrupt_sealed_required_sqlite(self.base / 'snapshots' / self.run_id)
+        self.cli('latest', False)
+
     def test_tamper_after_validation(self):
         self.cli('seal')
         (self.meta / 'report.txt').write_text('tampered')
