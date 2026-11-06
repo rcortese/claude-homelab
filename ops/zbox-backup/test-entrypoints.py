@@ -145,6 +145,17 @@ LOCK_FILE={self.base}/lock
         self.run_backup()
         self.assertFalse((self.remote / 'attempts').exists())
 
+    def test_incomplete_attempt_limit_blocks_capture(self):
+        for name in ('20010101T000000Z', '20010102T000000Z', '20010103T000000Z'):
+            p = self.remote / 'attempts' / name
+            p.mkdir(parents=True)
+            (p / 'preserve').write_text('incomplete evidence')
+        result = self.run_backup()
+        self.assertIn('ALERT: incomplete attempt limit reached', result.stderr)
+        self.assertEqual(len(list((self.remote / 'attempts').iterdir())), 3)
+        for p in (self.remote / 'attempts').iterdir():
+            self.assertEqual((p / 'preserve').read_text(), 'incomplete evidence')
+
     def test_capture_transport_interrupted(self):
         self.run_backup('capture')
 

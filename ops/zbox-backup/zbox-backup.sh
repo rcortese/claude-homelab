@@ -219,7 +219,7 @@ remote_run "findmnt /mnt/user -n -o TARGET,FSTYPE | grep -q '^/mnt/user[[:space:
   echo "remote backup target is not the expected Unraid shfs mount" >&2
   exit 1
 }
-remote_run "umask 077; mkdir -p '$REMOTE_ROOT/attempts' '$REMOTE_SNAPSHOT_ROOT'; test ! -e '$REMOTE_SNAPSHOT_ROOT/$RUN_TS' && mkdir '$REMOTE_SNAPSHOT' && mkdir '$REMOTE_SNAPSHOT/.generation'"
+generation begin
 # Freeze the selection and exclusions used for this attempt.
 cp "$BACKUP_PATHS_FILE" "$LOCAL_STAGING/backup-paths.txt"
 if [[ -f "$BACKUP_EXCLUDES_FILE" ]]; then

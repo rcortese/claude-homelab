@@ -168,6 +168,25 @@ class Generation(unittest.TestCase):
         self.cli('publish', False)
         self.old_good()
 
+    def test_begin_caps_incomplete_attempts_without_deleting(self):
+        for run_id in ('20010101T000000Z', '20010102T000000Z'):
+            self.run_id = run_id
+            self.cli('begin')
+        self.run_id = '20010103T000000Z'
+        result = self.cli('begin', False)
+        self.assertIn('ALERT: incomplete attempt limit reached', result.stderr)
+        self.assertEqual(len(list((self.base / 'attempts').iterdir())), 3)
+        self.old_good()
+
+    def test_begin_no_space_fails_before_attempt_allocation(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        with patch.object(g.shutil, 'disk_usage', return_value=SimpleNamespace(free=0)):
+            with self.assertRaisesRegex(ValueError, 'ALERT: no destination free space'):
+                g.begin(self.base, '20010103T000000Z')
+        self.assertFalse((self.base / 'attempts/20010103T000000Z').exists())
+        self.old_good()
+
     def test_capture_interrupted_no_seal(self):
         self.cli('publish', False)
         self.old_good()

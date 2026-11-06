@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import stat
 import sys
@@ -141,6 +142,22 @@ def checks(root):
     return {'sqlite_databases': db_count, 'dump': validate_dump(metadata / 'homeassistant.sql.gz')}
 
 
+def begin(base, run):
+    # Approved policy: at most three incomplete attempts, no implicit cleanup.
+    # The existing producer lock serializes capture; reserve before writing data.
+    attempts = base / 'attempts'
+    attempts.mkdir(parents=True, exist_ok=True, mode=0o700)
+    snapshots = base / 'snapshots'
+    snapshots.mkdir(exist_ok=True, mode=0o700)
+    require(sum(1 for p in attempts.iterdir() if p.is_dir()) < 3,
+            'ALERT: incomplete attempt limit reached; preserve evidence and repair')
+    require(shutil.disk_usage(base).free > 0, 'ALERT: no destination free space')
+    require(not (snapshots / run).exists(), 'generation already exists; reconcile before retry')
+    root = attempts / run
+    root.mkdir(mode=0o700)
+    (root / '.generation').mkdir(mode=0o700)
+
+
 def seal(root, run):
     require(root.name == run, 'generation identity mismatch')
     meta = root / '.generation'
@@ -193,7 +210,9 @@ def main(argv):
     require(re.fullmatch(r'[0-9]{8}T[0-9]{6}Z', run) is not None, 'invalid run id')
     base = Path(base_arg)
     require(base.is_absolute(), 'backup base must be absolute')
-    if action == 'seal':
+    if action == 'begin':
+        begin(base, run)
+    elif action == 'seal':
         seal(base / 'attempts' / run, run)
     elif action == 'publish':
         publish(base, run)
